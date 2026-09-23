@@ -43,6 +43,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                 <th className="py-3 px-4 text-center">Enregistrements</th>
                 <th className="py-3 px-4 text-center">Doublons trouvés</th>
                 <th className="py-3 px-4 text-center">Cas incertains</th>
+                <th className="py-3 px-4 text-center">Différents</th>
                 <th className="py-3 px-4 text-center">Statut</th>
                 <th className="py-3 px-4 text-center">Action</th>
               </tr>
@@ -95,6 +96,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                       <AlertTriangle className="w-3 h-3" />
                       <span>{item.uncertainCases}</span>
                     </span>
+                  </td>
+
+                  {/* Différents */}
+                  <td className="py-3.5 px-4 text-center font-bold font-mono text-[#E4E9E1]">
+                    {item.differentCount ?? 0}
                   </td>
 
                   {/* Statut */}

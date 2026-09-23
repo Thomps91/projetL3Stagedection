@@ -15,7 +15,7 @@ import { MatchPair } from '../types';
 
 interface ArbitrationViewProps {
   matches: MatchPair[];
-  onArbitrate: (matchId: string, decision: 'confirmed' | 'rejected') => void;
+  onArbitrate: (matchId: string, decision: 'confirmed' | 'rejected') => Promise<void> | void;
   onResetArbitration: () => void;
 }
 
@@ -34,19 +34,23 @@ export const ArbitrationView: React.FC<ArbitrationViewProps> = ({
   const processedCount = uncertainMatches.filter((m) => m.decision).length;
   const pendingCount = uncertainMatches.filter((m) => !m.decision).length;
 
-  const handleDecision = (decision: 'confirmed' | 'rejected') => {
+  const handleDecision = async (decision: 'confirmed' | 'rejected') => {
     if (!currentMatch) return;
 
-    onArbitrate(currentMatch.id, decision);
+    try {
+      await onArbitrate(currentMatch.id, decision);
 
-    const label = decision === 'confirmed' ? 'Confirmé comme doublon' : 'Refusé comme doublon';
-    setToastMessage(`✓ Décision enregistrée : ${label} pour "${currentMatch.recordA.nom}".`);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 3500);
+      const label = decision === 'confirmed' ? 'Confirmé comme doublon' : 'Refusé comme doublon';
+      setToastMessage(`✓ Décision enregistrée : ${label} pour "${currentMatch.recordA.nom}".`);
+      setTimeout(() => {
+        setToastMessage(null);
+      }, 3500);
 
-    if (safeIndex < uncertainMatches.length - 1) {
-      setCurrentIndex(safeIndex + 1);
+      if (safeIndex < uncertainMatches.length - 1) {
+        setCurrentIndex(safeIndex + 1);
+      }
+    } catch (error) {
+      console.error('Erreur d\'arbitrage côté interface:', error);
     }
   };
 

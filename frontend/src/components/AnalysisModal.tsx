@@ -6,11 +6,15 @@ import {
   ArrowRight,
 } from 'lucide-react';
 
+import { runAnalysis } from '../services/api';
+
 interface AnalysisModalProps {
   isOpen: boolean;
   totalRecords: number;
   onComplete: () => void;
   onClose: () => void;
+  fileIds?: string[];
+  onRunComplete?: (resp: any) => void;
 }
 
 const PHASES = [
@@ -25,6 +29,7 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
   totalRecords,
   onComplete,
   onClose,
+  onRunComplete,
 }) => {
   const [progress, setProgress] = useState(0);
   const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
@@ -37,6 +42,32 @@ export const AnalysisModal: React.FC<AnalysisModalProps> = ({
       setIsFinished(false);
       return;
     }
+
+    // Launch real analysis on backend when modal opens
+    let cancelled = false;
+    const doRun = async () => {
+      if (!fileIds || fileIds.length === 0) return;
+      try {
+        const resp = await runAnalysis(fileIds);
+        if (cancelled) return;
+        // provide result to parent
+        onRunComplete && onRunComplete(resp);
+        // fast-forward progress
+        setProgress(100);
+        setIsFinished(true);
+      } catch (err) {
+        console.error('Erreur analyse backend:', err);
+        // keep simulation, but mark finished after short delay
+        setTimeout(() => {
+          if (!cancelled) {
+            setProgress(100);
+            setIsFinished(true);
+          }
+        }, 1000);
+      }
+    };
+
+    doRun();
 
     // Interval to simulate progression from 0 to 100%
     const interval = setInterval(() => {

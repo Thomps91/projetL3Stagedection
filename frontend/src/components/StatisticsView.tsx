@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   BarChart3,
   PieChart,
@@ -10,6 +10,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { MatchPair, UploadedFile } from '../types';
+import { getDashboardStats } from '../services/api';
 
 interface StatisticsViewProps {
   matches: MatchPair[];
@@ -22,11 +23,27 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
   files,
   totalRecordsCount,
 }) => {
-  const duplicatesCount = matches.filter((m) => m.status === 'duplicate').length;
-  const uncertainCount = matches.filter((m) => m.status === 'uncertain').length;
-  const differentCount = matches.filter((m) => m.status === 'different').length;
+  const [remoteStats, setRemoteStats] = useState<any | null>(null);
 
-  const totalAnalyzed = totalRecordsCount;
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const stats = await getDashboardStats();
+        if (!cancelled) setRemoteStats(stats);
+      } catch (err) {
+        console.warn('Impossible de récupérer les stats distantes:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const duplicatesCount = remoteStats?.duplicatesFound ?? matches.filter((m) => m.status === 'duplicate').length;
+  const uncertainCount = remoteStats?.uncertainCases ?? matches.filter((m) => m.status === 'uncertain').length;
+  const differentCount = remoteStats?.differentCount ?? matches.filter((m) => m.status === 'different').length;
+  const totalAnalyzed = remoteStats?.totalRecords ?? totalRecordsCount;
+  const totalFiles = remoteStats?.totalFiles ?? files.length;
+  const arbitratedCount = matches.filter((m) => m.decision === 'confirmed' || m.decision === 'rejected').length;
   const totalPairs = matches.length || 1;
 
   const duplicatesPct = Math.round((duplicatesCount / totalPairs) * 100);
@@ -50,7 +67,11 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
 
   return (
     <div id="statistics-view" className="space-y-6">
-      {/* Header */}
+      {remoteStats && (
+        <div className="text-xs text-[#8F8F8A]">
+          Statistiques serveur : {totalFiles} fichiers, {totalAnalyzed} enregistrements
+        </div>
+      )}
       <div>
         <h2 className="text-xl font-bold text-[#E4E9E1] tracking-tight">Statistiques</h2>
         <p className="text-xs text-[#8F8F8A] mt-1">
@@ -58,9 +79,18 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
         </p>
       </div>
 
-      {/* Primary KPI Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* 1. Nombre total d’enregistrements analysés */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="bg-[#191919] rounded-2xl p-5 border border-[#2C2C2C] shadow-2xs">
+          <div className="flex items-center justify-between text-[#8F8F8A] mb-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">Fichiers</span>
+            <div className="w-8 h-8 rounded-xl bg-[#111111] text-[#AEB4C1] border border-[#2C2C2C] flex items-center justify-center">
+              <Layers className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-[#E4E9E1]">{totalFiles.toLocaleString('fr-FR')}</div>
+          <p className="text-xs text-[#8F8F8A] mt-1">Sources enregistrées</p>
+        </div>
+
         <div className="bg-[#191919] rounded-2xl p-5 border border-[#2C2C2C] shadow-2xs">
           <div className="flex items-center justify-between text-[#8F8F8A] mb-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">Total Analysé</span>
@@ -69,10 +99,9 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
             </div>
           </div>
           <div className="text-2xl font-bold text-[#E4E9E1]">{totalAnalyzed.toLocaleString('fr-FR')}</div>
-          <p className="text-xs text-[#8F8F8A] mt-1">Sur {files.length} fichiers sources croisés</p>
+          <p className="text-xs text-[#8F8F8A] mt-1">Enregistrements dans PostgreSQL</p>
         </div>
 
-        {/* 2. Doublons probables */}
         <div className="bg-[#191919] rounded-2xl p-5 border border-[#2C2C2C] shadow-2xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">
@@ -89,7 +118,6 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
           <p className="text-xs text-[#8F8F8A] mt-1">Score de rapprochement ≥ 90%</p>
         </div>
 
-        {/* 3. Cas incertains */}
         <div className="bg-[#191919] rounded-2xl p-5 border border-[#2C2C2C] shadow-2xs">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">
@@ -106,20 +134,30 @@ export const StatisticsView: React.FC<StatisticsViewProps> = ({
           <p className="text-xs text-[#8F8F8A] mt-1">Score entre 70% et 89%</p>
         </div>
 
-        {/* 4. Enregistrements différents */}
         <div className="bg-[#191919] rounded-2xl p-5 border border-[#2C2C2C] shadow-2xs">
           <div className="flex items-center justify-between text-[#8F8F8A] mb-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">Différents</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">Décisions</span>
             <div className="w-8 h-8 rounded-xl bg-[#111111] text-[#AEB4C1] border border-[#2C2C2C] flex items-center justify-center">
-              <Users className="w-4 h-4" />
+              <CheckCircle2 className="w-4 h-4" />
             </div>
           </div>
-          <div className="flex items-baseline gap-2">
-            <div className="text-2xl font-bold text-[#E4E9E1]">{differentCount}</div>
-            <span className="text-xs font-semibold text-[#8F8F8A]">({differentPct}%)</span>
-          </div>
-          <p className="text-xs text-[#8F8F8A] mt-1">Enregistrements uniques isolés</p>
+          <div className="text-2xl font-bold text-[#E4E9E1]">{arbitratedCount}</div>
+          <p className="text-xs text-[#8F8F8A] mt-1">Cas arbitrés</p>
         </div>
+      </div>
+
+      <div className="bg-[#191919] rounded-2xl p-5 border border-[#2C2C2C] shadow-2xs">
+        <div className="flex items-center justify-between text-[#8F8F8A] mb-2">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-[#8F8F8A]">Différents</span>
+          <div className="w-8 h-8 rounded-xl bg-[#111111] text-[#AEB4C1] border border-[#2C2C2C] flex items-center justify-center">
+            <Users className="w-4 h-4" />
+          </div>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <div className="text-2xl font-bold text-[#E4E9E1]">{differentCount}</div>
+          <span className="text-xs font-semibold text-[#8F8F8A]">({differentPct}%)</span>
+        </div>
+        <p className="text-xs text-[#8F8F8A] mt-1">Enregistrements uniques isolés</p>
       </div>
 
       {/* Visual Graphs: Distribution & Breakdown */}
