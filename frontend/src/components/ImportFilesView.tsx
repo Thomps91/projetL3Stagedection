@@ -1,7 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 
 import {
   FileSpreadsheet,
+  Eye,
   Trash2,
   Table,
   CheckCircle2,
@@ -9,32 +10,55 @@ import {
   Upload,
   Sparkles,
   Info,
+  Play,
 } from 'lucide-react';
 
 import { UploadedFile, DataRecord } from '../types';
 import { uploadFiles } from '../services/api';
+import { FileDataSheet } from './FileDataSheet';
 
 interface ImportFilesViewProps {
   files: UploadedFile[];
+  sessionId: string;
+  records: DataRecord[];
   onAddFiles: (
     newFiles: UploadedFile[],
     newRecords?: DataRecord[]
   ) => void;
-  onRemoveFile: (fileId: string) => void;
+  onRemoveFile: (fileId: string) => Promise<void> | void;
   onGoToDataPreview: () => void;
+  onStartAnalysis: (fileId?: string) => void;
   onResetToDemo: () => void;
 }
 
 export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
   files,
+  sessionId,
+  records,
   onAddFiles,
   onRemoveFile,
   onGoToDataPreview,
+  onStartAnalysis,
   onResetToDemo,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [expandedFileId, setExpandedFileId] = useState<string | null>(null);
+
+  const fileSessions = useMemo(() => {
+    const groups = new Map<string, UploadedFile[]>();
+    files.forEach((file) => {
+      const sessionId = file.sessionId ?? `legacy-${file.id}`;
+      groups.set(sessionId, [...(groups.get(sessionId) ?? []), file]);
+    });
+    return [...groups.entries()].map(([id, sessionFiles]) => ({ id, files: sessionFiles }));
+  }, [files]);
+
+  const formatSessionDate = (uploadDate: string) => {
+    const match = uploadDate.match(/^(\d{2}\/\d{2}\/\d{4})\s+(\d{2}:\d{2})/);
+    return match ? `${match[1]} \u00e0 ${match[2]}` : uploadDate;
+  };
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -101,18 +125,21 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
 
     let uploadedFiles: UploadedFile[] = [];
     const errors: string[] = [];
+    let uploadFailureMessage: string | null = null;
 
     try {
-      const resp = await uploadFiles(selectedFiles);
+      const resp = await uploadFiles(selectedFiles, sessionId);
 
       uploadedFiles = resp.files.map((backendFile) => ({
         id: backendFile.id,
+        sessionId: backendFile.sessionId,
         name: backendFile.name,
         size: backendFile.size,
         sizeBytes: backendFile.sizeBytes,
         format: backendFile.format as 'CSV' | 'XLSX' | 'XLS',
         rowCount: backendFile.rowCount,
         uploadDate: backendFile.uploadDate,
+        sourceColumns: backendFile.sourceColumns || [],
       }));
 
       // Map records returned by backend to DataRecord shape if present
@@ -120,11 +147,14 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
         id: r.id,
         nom: r.nom,
         prenom: r.prenom,
+        date_naissance: r.date_naissance,
+        cin: r.cin,
         email: r.email,
         telephone: r.telephone,
         adresse: r.adresse,
         ville: r.ville,
         sourceFile: r.sourceFile,
+        sourceValues: r.sourceValues || {},
       }));
 
       if (uploadedFiles.length > 0) {
@@ -132,11 +162,13 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
       }
 
       if (resp.warnings && resp.warnings.length > 0) {
+        uploadFailureMessage = resp.warnings.join(' ');
         setUploadMessage(resp.warnings.join(' — '));
       }
     } catch (err) {
       console.error('Erreur lors de l import:', err);
       const backendMessage = err instanceof Error ? err.message : 'Erreur inconnue lors de l\'import.';
+      uploadFailureMessage = backendMessage;
       setUploadMessage(backendMessage);
       errors.push(...selectedFiles.map((f) => f.name));
     }
@@ -152,7 +184,7 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
         `${uploadedFiles.length} fichier(s) importé(s). Échec pour : ${errors.join(', ')}.`
       );
     } else {
-      setUploadMessage(`Aucun fichier n'a pu être importé.`);
+      setUploadMessage(uploadFailureMessage || `Aucun fichier n'a pu être importé.`);
     }
 
     setTimeout(() => {
@@ -324,21 +356,6 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
               doublons potentiels.
             </p>
           </div>
-
-          {/* Action button */}
-          {files.length > 0 && (
-            <button
-              id="btn-voir-les-donnees-top"
-              onClick={onGoToDataPreview}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#8EB735] hover:bg-[#7ea32e] text-[#0A0A0A] text-xs font-bold transition-all shadow-xs cursor-pointer"
-            >
-              <Table className="w-3.5 h-3.5" />
-
-              <span>
-                Voir les données
-              </span>
-            </button>
-          )}
         </div>
 
         {files.length === 0 ? (
@@ -347,12 +364,16 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
             Veuillez glisser un fichier CSV ou Excel.
           </div>
         ) : (
-          <div className="divide-y divide-[#2C2C2C]">
-            {files.map((file) => (
+          <div className="space-y-5 p-3">
+            {fileSessions.map((session) => (
+              <section key={session.id} className="space-y-2">
+                <h4 className="px-1 text-xs font-semibold text-[#8F8F8A]">Session &mdash; {formatSessionDate(session.files[0].uploadDate)}</h4>
+                <div className="space-y-2">
+                {session.files.map((file) => (
               <div
                 key={file.id}
                 id={`file-row-${file.id}`}
-                className="p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 hover:bg-[#111111]/80 transition-colors"
+                className="p-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3 rounded-xl border border-[#2C2C2C] bg-[#111111]/70 hover:bg-[#111111] transition-colors"
               >
                 <div className="flex items-center gap-3.5 min-w-0">
                   <div
@@ -370,7 +391,7 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
                   </div>
 
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-[#E4E9E1] truncate">
+                    <p className="text-sm font-semibold font-mono text-[#E4E9E1] truncate">
                       {file.name}
                     </p>
 
@@ -400,8 +421,18 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
                   </span>
 
                   <button
+                    id={`btn-voir-les-donnees-${file.id}`}
+                    type="button"
+                    onClick={() => setExpandedFileId(expandedFileId === file.id ? null : file.id)}
+                    title="Voir les données de ce fichier"
+                    className="px-2.5 py-1.5 rounded-lg bg-[#1d2027] hover:bg-[#252832] text-xs text-[#9ca3af] hover:text-[#18231d] border border-[#2b2f3a] flex items-center gap-1.5 transition-colors"
+                  >
+                    <Eye className="w-3.5 h-3.5 text-[#a3e635]" />
+                    <span className="hidden sm:inline">{expandedFileId === file.id ? "Masquer" : "Voir"}</span>
+                  </button>
+                  <button
                     id={`btn-delete-file-${file.id}`}
-                    onClick={() => onRemoveFile(file.id)}
+                    onClick={() => void onRemoveFile(file.id)}
                     title="Supprimer ce fichier"
                     disabled={isUploading}
                     className="p-1.5 rounded-lg text-[#8F8F8A] hover:text-[#D87A71] hover:bg-[#D87A71]/15 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -409,14 +440,23 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
+                {expandedFileId === file.id && (
+                  <FileDataSheet
+                    file={file}
+                    records={records}
+                    onClose={() => setExpandedFileId(null)}
+                  />
+                )}
               </div>
+                ))}
+                </div>
+              </section>
             ))}
           </div>
         )}
 
         {/* Bottom footer */}
-        {files.length > 0 && (
-          <div className="p-4 bg-[#111111]/80 border-t border-[#2C2C2C] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="p-4 bg-[#111111]/80 border-t border-[#2C2C2C] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="text-xs text-[#8F8F8A] flex items-center gap-1.5">
               <Info className="w-3.5 h-3.5 text-[#8EB735]" />
 
@@ -430,20 +470,32 @@ export const ImportFilesView: React.FC<ImportFilesViewProps> = ({
               </span>
             </div>
 
-            <button
-              id="btn-voir-les-donnees"
-              onClick={onGoToDataPreview}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#8EB735] hover:bg-[#7ea32e] active:bg-[#6f9027] text-[#0A0A0A] text-xs font-bold transition-all shadow-xs cursor-pointer"
-            >
-              <Table className="w-3.5 h-3.5" />
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <button
+                id="btn-start-analysis-import"
+                onClick={() => onStartAnalysis()}
+                disabled={isUploading}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#8EB735] hover:bg-[#7ea32e] active:bg-[#6f9027] text-[#0A0A0A] text-xs font-bold transition-all shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="w-3.5 h-3.5 fill-[#0A0A0A] text-[#0A0A0A]" />
+                <span>Lancer l'analyse</span>
+              </button>
+              {files.length > 0 && (
+                <button
+                  id="btn-voir-les-donnees"
+                  onClick={onGoToDataPreview}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#8EB735] hover:bg-[#7ea32e] active:bg-[#6f9027] text-[#0A0A0A] text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  <Table className="w-3.5 h-3.5" />
 
-              <span>
-                Voir les données
-              </span>
-            </button>
+                  <span>
+                    Voir les données
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
-        )}
-      </div>
+        </div>
     </div>
   );
 };

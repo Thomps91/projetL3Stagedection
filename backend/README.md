@@ -112,3 +112,10 @@ TypeScript de `src/types.ts` (`DataRecord`, `UploadedFile`, `MatchPair`,
 `FieldComparison`, `AnalysisHistoryItem`), pour un branchement direct côté
 frontend (remplacer `mockData.ts` par des appels `fetch`/`axios` vers ces
 routes).
+
+
+## Connexion et protection des donnees
+
+L'application demande un compte avant d'acceder aux routes de donnees. Le premier compte cree rattache les anciennes donnees sans proprietaire; les comptes suivants ne voient que leurs propres fichiers et analyses. En developpement, `AUTH_COOKIE_SECURE=false` permet les cookies sur HTTP local. En production, servir l'interface et `/api` sur la meme origine via HTTPS et definir `AUTH_COOKIE_SECURE=true`.
+
+Pour la confirmation d'adresse e-mail, renseigner `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` et `FRONTEND_BASE_URL` dans `backend/.env`. Le lien de confirmation expire apres 30 minutes.

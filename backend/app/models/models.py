@@ -20,6 +20,51 @@ def gen_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:12]}"
 
 
+
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("user"))
+    name: Mapped[str] = mapped_column(String, nullable=False, default="")
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    email_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class EmailVerificationModel(Base):
+    __tablename__ = "email_verifications"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("verify"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AuthSessionModel(Base):
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("auth"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    mfa_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LoginChallengeModel(Base):
+    __tablename__ = "login_challenges"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    code_hash: Mapped[str] = mapped_column(String, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class UploadedFileModel(Base):
     __tablename__ = "uploaded_files"
 
@@ -28,6 +73,10 @@ class UploadedFileModel(Base):
         primary_key=True,
         default=lambda: gen_id("file"),
     )
+
+    owner_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    session_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     name: Mapped[str] = mapped_column(
         String,
@@ -54,6 +103,8 @@ class UploadedFileModel(Base):
         default=0,
     )
 
+    source_columns: Mapped[list] = mapped_column(JSON, default=list)
+
     upload_date: Mapped[str] = mapped_column(
         String,
         nullable=False,
@@ -73,6 +124,8 @@ class UploadedFileModel(Base):
 class DataRecordModel(Base):
     __tablename__ = "data_records"
 
+    owner_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+
     id: Mapped[str] = mapped_column(
         String,
         primary_key=True,
@@ -88,6 +141,10 @@ class DataRecordModel(Base):
         String,
         nullable=True,
     )
+
+    date_naissance: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    cin: Mapped[str | None] = mapped_column(String, nullable=True)
 
     email: Mapped[str] = mapped_column(
         String,
@@ -118,6 +175,8 @@ class DataRecordModel(Base):
         nullable=False,
     )
 
+    source_values: Mapped[dict] = mapped_column(JSON, default=dict)
+
     file_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey(
@@ -134,6 +193,7 @@ class DataRecordModel(Base):
 
 class AnalysisHistoryModel(Base):
     __tablename__ = "analysis_history"
+    owner_id: Mapped[str | None] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
 
     id: Mapped[str] = mapped_column(
         String,
@@ -173,7 +233,7 @@ class AnalysisHistoryModel(Base):
 
     status: Mapped[str] = mapped_column(
         String,
-        default="Terminé",
+        default="Termin\u00e9",
     )
 
     execution_time: Mapped[str] = mapped_column(
@@ -324,4 +384,25 @@ class FieldComparisonModel(Base):
     similarity: Mapped[int] = mapped_column(
         Integer,
         default=0,
+    )
+
+class AnalysisSnapshotModel(Base):
+    """Immutable input and output snapshot for one completed analysis."""
+
+    __tablename__ = "analysis_snapshots"
+
+    analysis_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("analysis_history.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    payload: Mapped[dict] = mapped_column(
+        JSON,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
     )

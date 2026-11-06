@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatBirthDate } from '../utils/formatBirthDate';
 import {
   X,
   FileText,
@@ -14,7 +15,7 @@ import { MatchPair } from '../types';
 interface MatchDetailModalProps {
   match: MatchPair | null;
   onClose: () => void;
-  onArbitrate: (matchId: string, decision: 'confirmed' | 'rejected') => void;
+  onArbitrate: (matchId: string, decision: 'confirmed' | 'rejected') => Promise<void> | void;
 }
 
 export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
@@ -164,14 +165,14 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                         <div className="text-[10px] text-[#8F8F8A] font-semibold mb-0.5">
                           Valeur Enregistrement A
                         </div>
-                        <div className="font-mono text-[#E4E9E1] break-words">{item.valA || '—'}</div>
+                        <div className="font-mono text-[#E4E9E1] break-words">{(item.field === 'date_naissance' ? formatBirthDate(item.valA) : item.valA) || '—'}</div>
                       </div>
 
                       <div className="p-2.5 rounded-lg bg-[#191919] border border-[#2C2C2C] shadow-2xs">
                         <div className="text-[10px] text-[#8F8F8A] font-semibold mb-0.5">
                           Valeur Enregistrement B
                         </div>
-                        <div className="font-mono text-[#E4E9E1] break-words">{item.valB || '—'}</div>
+                        <div className="font-mono text-[#E4E9E1] break-words">{(item.field === 'date_naissance' ? formatBirthDate(item.valB) : item.valB) || '—'}</div>
                       </div>
                     </div>
                   </div>
@@ -193,9 +194,13 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
               <>
                 <button
                   id="btn-modal-confirm-match"
-                  onClick={() => {
-                    onArbitrate(match.id, 'confirmed');
-                    onClose();
+                  onClick={async () => {
+                    try {
+                      await onArbitrate(match.id, 'confirmed');
+                      onClose();
+                    } catch {
+                      // L'erreur est deja affichee par le gestionnaire.
+                    }
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#8EB735] hover:bg-[#8EB735]/90 text-[#111111] text-xs font-bold shadow-xs transition-colors cursor-pointer"
                 >
@@ -204,9 +209,13 @@ export const MatchDetailModal: React.FC<MatchDetailModalProps> = ({
                 </button>
                 <button
                   id="btn-modal-reject-match"
-                  onClick={() => {
-                    onArbitrate(match.id, 'rejected');
-                    onClose();
+                  onClick={async () => {
+                    try {
+                      await onArbitrate(match.id, 'rejected');
+                      onClose();
+                    } catch {
+                      // L'erreur est deja affichee par le gestionnaire.
+                    }
                   }}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#D87A71]/15 hover:bg-[#D87A71]/25 border border-[#D87A71]/30 text-[#D87A71] text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
                 >

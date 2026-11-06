@@ -6,9 +6,13 @@ from app.core.config import get_settings
 
 settings = get_settings()
 
+database_url = settings.DATABASE_URL
+connect_args = {"client_encoding": "UTF8"} if database_url.lower().startswith(("postgresql://", "postgresql+")) else {}
+
 engine = create_engine(
-    settings.DATABASE_URL,
+    database_url,
     pool_pre_ping=True,
+    connect_args=connect_args,
 )
 
 SessionLocal = sessionmaker(

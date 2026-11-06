@@ -16,6 +16,8 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+import zipfile
+from datetime import datetime
 
 import pandas as pd
 
@@ -34,6 +36,36 @@ COLUMN_ALIASES: dict[str, list[str]] = {
         "prenom",
         "firstname",
         "first name",
+    ],
+    "date_naissance": [
+        "date naissance",
+        "date de naissance",
+        "naissance",
+        "birth date",
+        "date of birth",
+        "dob",
+    ],
+    "cin": [
+        "cin",
+        "numero cin",
+        "numero de cin",
+        "n cin",
+        "no cin",
+        "cin n",
+        "numero carte identite",
+        "carte nationale identite",
+        "numero identite",
+        "numero d identite",
+        "n identite",
+        "numero identification",
+        "numero d identification",
+        "identity card number",
+        "identity number",
+        "national id",
+        "national id number",
+        "national identity number",
+        "id card number",
+        "id number",
     ],
     "email": [
         "email",
@@ -77,8 +109,9 @@ def _strip_accents(text: str) -> str:
 
 
 def _normalize_col(col: str) -> str:
-    """Normalise le nom d'une colonne."""
-    return _strip_accents(str(col)).strip().lower()
+    """Normalise le nom d'une colonne, y compris sa ponctuation."""
+    normalized = _strip_accents(str(col)).strip().lower()
+    return re.sub(r"[^a-z0-9]+", " ", normalized).strip()
 
 
 def _map_columns(columns: list[str]) -> dict[str, str]:
@@ -98,13 +131,55 @@ def _map_columns(columns: list[str]) -> dict[str, str]:
             for alias in aliases
         }
 
+        compact_aliases = {
+            alias.replace(" ", "")
+            for alias in normalized_aliases
+        }
+
         for original, normalized in normalized_cols.items():
 
-            if normalized in normalized_aliases:
+            matches = normalized in normalized_aliases
+            if field == "date_naissance":
+                # Accepte aussi les variantes camelCase et les unités ajoutées
+                # dans les en-têtes (ex. dateNaissance, Date de naissance (JJ/MM/AAAA)).
+                compact_normalized = normalized.replace(" ", "")
+                matches = (
+                    matches
+                    or compact_normalized in compact_aliases
+                    or any(normalized.startswith(alias + " ") for alias in normalized_aliases)
+                )
+
+            if matches:
                 mapping[field] = original
                 break
 
     return mapping
+
+
+def _normalize_birth_date(value: str | None) -> str | None:
+    """Return common date formats as ISO text while keeping unknown values."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    formats = (
+        "%Y-%m-%d",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M:%S.%f",
+        "%Y-%m-%dT%H:%M:%S",
+        "%Y%m%d",
+        "%d/%m/%Y",
+        "%d/%m/%y",
+        "%d-%m-%Y",
+        "%d-%m-%y",
+        "%d.%m.%Y",
+        "%Y/%m/%d",
+    )
+    for date_format in formats:
+        try:
+            return datetime.strptime(raw, date_format).date().isoformat()
+        except ValueError:
+            continue
+    return raw
 
 
 def _normalize_phone(value: str | None) -> str:
@@ -187,38 +262,62 @@ def read_tabular_file(
     ext = filename.rsplit(".", 1)[-1].lower()
 
     if ext == "csv":
+        encodings = ("utf-8-sig", "cp1252", "latin1")
 
-        for sep in (",", ";", "\t"):
-
-            try:
-                df = pd.read_csv(
-                    io.BytesIO(content),
-                    sep=sep,
-                    encoding="utf-8-sig",
-                    dtype=str,
-                    keep_default_na=False,
-                )
+        for encoding in encodings:
+            for sep in (",", ";", "\t"):
+                try:
+                    df = pd.read_csv(
+                        io.BytesIO(content),
+                        sep=sep,
+                        encoding=encoding,
+                        dtype=str,
+                        keep_default_na=False,
+                    )
+                except UnicodeDecodeError:
+                    break
+                except (pd.errors.ParserError, ValueError):
+                    continue
 
                 if df.shape[1] > 1:
                     return df
 
-            except Exception:
+        for encoding in encodings:
+            try:
+                return pd.read_csv(
+                    io.BytesIO(content),
+                    sep=None,
+                    engine="python",
+                    encoding=encoding,
+                    dtype=str,
+                    keep_default_na=False,
+                )
+            except UnicodeDecodeError:
+                continue
+            except (pd.errors.ParserError, ValueError):
                 continue
 
-        return pd.read_csv(
-            io.BytesIO(content),
-            sep=None,
-            engine="python",
-            encoding="utf-8-sig",
-            dtype=str,
-            keep_default_na=False,
-        )
+        raise ValueError("Impossible de lire le fichier CSV avec les encodages pris en charge.")
 
     if ext in ("xlsx", "xls"):
-
+        legacy_xls_signature = bytes.fromhex("D0 CF 11 E0 A1 B1 1A E1")
+        is_ooxml = zipfile.is_zipfile(io.BytesIO(content))
+        is_legacy_xls = content.startswith(legacy_xls_signature)
+        if is_ooxml:
+            engine = "openpyxl"
+        elif is_legacy_xls:
+            engine = "xlrd"
+        elif ext == "xls":
+            engine = "xlrd"
+        else:
+            raise ValueError(
+                "Le contenu ne correspond ni a un classeur .xlsx valide "
+                "ni a un ancien classeur .xls. Verifiez le fichier et son extension."
+            )
         return pd.read_excel(
             io.BytesIO(content),
             dtype=str,
+            engine=engine,
         )
 
     raise ValueError(
@@ -229,7 +328,7 @@ def read_tabular_file(
 def parse_records(
     filename: str,
     content: bytes,
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict], int, list[str]]:
     """
     Parse un fichier importé.
 
@@ -246,9 +345,9 @@ def parse_records(
     # Supprime les lignes complètement vides.
     df = df.dropna(how="all")
 
-    mapping = _map_columns(
-        list(df.columns)
-    )
+    source_columns = [str(column) for column in df.columns]
+    mapping = _map_columns(source_columns)
+    cin_column = mapping.get("cin")
 
     records: list[dict] = []
 
@@ -271,6 +370,8 @@ def parse_records(
                 row,
                 mapping.get("prenom"),
             ),
+            "date_naissance": _normalize_birth_date(_cell(row, mapping.get("date_naissance"))),
+            "cin": _cell(row, mapping.get("cin")),
             "email": (
                 _cell(
                     row,
@@ -296,6 +397,14 @@ def parse_records(
                 or ""
             ),
             "sourceFile": filename,
+            "sourceValues": {
+                column: (
+                    "****" + (str(_cell(row, column))[-4:] if len(str(_cell(row, column))) > 4 else "")
+                    if column == cin_column and _cell(row, column)
+                    else (_cell(row, column) or "")
+                )
+                for column in source_columns
+            },
         }
 
         # Ignore les lignes complètement vides.
@@ -306,7 +415,7 @@ def parse_records(
         ):
             records.append(record)
 
-    return records, len(df)
+    return records, len(df), source_columns
 
 
 def _cell(

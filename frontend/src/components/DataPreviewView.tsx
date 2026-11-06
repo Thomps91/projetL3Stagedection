@@ -5,13 +5,38 @@ import {
   Filter,
   ArrowUpDown,
   FileSpreadsheet,
-  Building2,
   FileText,
   Play,
   Layers,
   ChevronDown,
 } from 'lucide-react';
 import { DataRecord, UploadedFile } from '../types';
+import { formatBirthDate } from '../utils/formatBirthDate';
+
+function formatImportTimestamp(value: string): string {
+  const timestamp = value.trim();
+  const localMatch = timestamp.match(/^(\d{2}\/\d{2}\/\d{4})[ T]+(\d{2}:\d{2})(?::\d{2})?$/);
+  if (localMatch) {
+    return `Import\u00e9 le ${localMatch[1]} \u00e0 ${localMatch[2]}`;
+  }
+
+  const parsed = new Date(timestamp);
+  if (!Number.isNaN(parsed.getTime())) {
+    const formatted = new Intl.DateTimeFormat('fr-FR', {
+      timeZone: 'Africa/Nairobi',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(parsed).replace(',', '');
+    const [date, time] = formatted.split(' ');
+    return `Import\u00e9 le ${date} \u00e0 ${time}`;
+  }
+
+  return `Import\u00e9 le ${timestamp}`;
+}
 
 interface DataPreviewViewProps {
   records: DataRecord[];
@@ -26,7 +51,7 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFileFilter, setSelectedFileFilter] = useState<string>('all');
-  const [sortField, setSortField] = useState<keyof DataRecord>('nom');
+  const [sortField, setSortField] = useState<Exclude<keyof DataRecord, 'sourceValues'>>('nom');
   const [sortAsc, setSortAsc] = useState(true);
 
   // Filter records
@@ -55,7 +80,25 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
       });
   }, [records, searchQuery, selectedFileFilter, sortField, sortAsc]);
 
-  const handleSort = (field: keyof DataRecord) => {
+  const uploadDateByFileName = useMemo(
+    () => new Map(files.map((file) => [file.name, file.uploadDate])),
+    [files]
+  );
+
+  const groupedRecords = useMemo(() => {
+    const groups = new Map<string, DataRecord[]>();
+
+    filteredRecords.forEach((record) => {
+      const sourceFile = record.sourceFile || 'Fichier inconnu';
+      const fileRecords = groups.get(sourceFile) ?? [];
+      fileRecords.push(record);
+      groups.set(sourceFile, fileRecords);
+    });
+
+    return Array.from(groups.entries());
+  }, [filteredRecords]);
+
+  const handleSort = (field: Exclude<keyof DataRecord, 'sourceValues'>) => {
     if (sortField === field) {
       setSortAsc(!sortAsc);
     } else {
@@ -77,15 +120,7 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
           </p>
         </div>
 
-        {/* Primary CTA: Lancer l'analyse */}
-        <button
-          id="btn-lancer-analyse"
-          onClick={onStartAnalysis}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#8EB735] hover:bg-[#7ea32e] active:bg-[#6f9027] text-[#0A0A0A] text-xs font-bold shadow-xs transition-all cursor-pointer"
-        >
-          <Play className="w-3.5 h-3.5 fill-[#0A0A0A] text-[#0A0A0A]" />
-          <span>Lancer l’analyse</span>
-        </button>
+        
       </div>
 
       {/* Summary Info Bar */}
@@ -109,16 +144,6 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
           <div>
             <div className="text-[11px] text-[#8F8F8A] font-medium">Fichiers sources</div>
             <div className="text-base font-bold text-[#E4E9E1]">{files.length} fichiers actifs</div>
-          </div>
-        </div>
-
-        <div className="bg-[#191919] rounded-2xl p-4 border border-[#2C2C2C] shadow-2xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-[#111111] text-[#AEB4C1] border border-[#2C2C2C] flex items-center justify-center">
-            <Building2 className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-[11px] text-[#8F8F8A] font-medium">Attributs comparables</div>
-            <div className="text-base font-bold text-[#E4E9E1]">5 champs cibles</div>
           </div>
         </div>
       </div>
@@ -209,6 +234,8 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
                     <ArrowUpDown className="w-3 h-3 text-[#8F8F8A]" />
                   </div>
                 </th>
+                <th className="py-3 px-4">Date de naissance</th>
+                <th className="py-3 px-4">CIN</th>
                 <th className="py-3 px-4">
                   <div className="flex items-center gap-1.5">
                     <span>Fichier source</span>
@@ -219,40 +246,66 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
             <tbody className="divide-y divide-[#2C2C2C] text-[#E4E9E1]">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-[#8F8F8A]">
+                  <td colSpan={8} className="py-8 text-center text-[#8F8F8A]">
                     Aucun enregistrement ne correspond aux critères de recherche.
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((rec) => (
-                  <tr key={rec.id} className="hover:bg-[#111111]/80 transition-colors">
-                    <td className="py-3 px-4 font-medium text-[#E4E9E1] flex items-center gap-2.5">
-                      <div className="w-6 h-6 rounded-full bg-[#111111] border border-[#2C2C2C] text-[#8EB735] flex items-center justify-center font-bold text-[10px]">
-                        {rec.nom.charAt(0)}
-                      </div>
-                      <span>{rec.nom}</span>
-                    </td>
-                    <td className="py-3 px-4 text-[#8F8F8A] font-mono text-[11px]">
-                      {rec.email}
-                    </td>
-                    <td className="py-3 px-4 text-[#E4E9E1] font-mono text-[11px]">
-                      {rec.telephone}
-                    </td>
-                    <td className="py-3 px-4 text-[#8F8F8A] truncate max-w-[200px]" title={rec.adresse}>
-                      {rec.adresse}
-                    </td>
-                    <td className="py-3 px-4 text-[#E4E9E1] font-medium">
-                      {rec.ville}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#111111] text-[#AEB4C1] border border-[#2C2C2C]">
-                        <FileText className="w-3 h-3 text-[#AEB4C1]" />
-                        <span className="truncate max-w-[140px]" title={rec.sourceFile}>
-                          {rec.sourceFile}
-                        </span>
-                      </span>
-                    </td>
-                  </tr>
+                groupedRecords.map(([sourceFile, fileRecords]) => (
+                  <React.Fragment key={sourceFile}>
+                    <tr className="border-t border-[#2C2C2C] bg-[#111111]">
+                      <td colSpan={8} className="px-4 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2 text-xs font-bold text-[#8EB735]">
+                            <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{sourceFile}</span>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[10px] font-medium text-[#8F8F8A]">
+                            <span>
+                              {fileRecords.length} enregistrement{fileRecords.length !== 1 ? 's' : ''}
+                            </span>
+                            {uploadDateByFileName.get(sourceFile) && (
+                              <span>
+                                {formatImportTimestamp(uploadDateByFileName.get(sourceFile)!)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                    {fileRecords.map((rec) => (
+                      <tr key={rec.id} className="hover:bg-[#111111]/80 transition-colors">
+                        <td className="py-3 px-4 font-medium text-[#E4E9E1] flex items-center gap-2.5">
+                          <div className="w-6 h-6 rounded-full bg-[#111111] border border-[#2C2C2C] text-[#8EB735] flex items-center justify-center font-bold text-[10px]">
+                            {rec.nom.charAt(0)}
+                          </div>
+                          <span>{rec.nom}</span>
+                        </td>
+                        <td className="py-3 px-4 text-[#8F8F8A] font-mono text-[11px]">
+                          {rec.email}
+                        </td>
+                        <td className="py-3 px-4 text-[#E4E9E1] font-mono text-[11px]">
+                          {rec.telephone}
+                        </td>
+                        <td className="py-3 px-4 text-[#8F8F8A] truncate max-w-[200px]" title={rec.adresse}>
+                          {rec.adresse}
+                        </td>
+                        <td className="py-3 px-4 text-[#E4E9E1] font-medium">
+                          {rec.ville}
+                        </td>
+                        <td className="py-3 px-4">{formatBirthDate(rec.date_naissance)}</td>
+                        <td className="py-3 px-4 font-mono">{rec.cin || ''}</td>
+                        <td className="py-3 px-4">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[10px] font-medium bg-[#111111] text-[#AEB4C1] border border-[#2C2C2C]">
+                            <FileText className="w-3 h-3 text-[#AEB4C1]" />
+                            <span className="truncate max-w-[140px]" title={rec.sourceFile}>
+                              {rec.sourceFile}
+                            </span>
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </React.Fragment>
                 ))
               )}
             </tbody>
@@ -264,14 +317,6 @@ export const DataPreviewView: React.FC<DataPreviewViewProps> = ({
           <div>
             Affichage de <strong className="text-[#E4E9E1]">{filteredRecords.length}</strong> lignes sur {records.length} enregistrements au total
           </div>
-          <button
-            id="btn-lancer-analyse-bottom"
-            onClick={onStartAnalysis}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-[#8EB735] hover:bg-[#7ea32e] active:bg-[#6f9027] text-[#0A0A0A] font-bold transition-all shadow-xs cursor-pointer"
-          >
-            <Play className="w-3.5 h-3.5 fill-[#0A0A0A] text-[#0A0A0A]" />
-            <span>Lancer l’analyse des correspondances</span>
-          </button>
         </div>
       </div>
     </div>
